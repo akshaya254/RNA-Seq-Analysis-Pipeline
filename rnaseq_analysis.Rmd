@@ -1,0 +1,1376 @@
+---
+title: "RNA-seq Differential Expression Analysis of SARS-CoV-2 Infected Human Eye Tissues"
+author: "Akshaya K"
+date: "2026-05-30"
+output:
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    number_sections: true
+    code_folding: show
+    df_print: paged
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+project_dir <- "C:/UNI/2.2/Bioinformatics 1/RNAseq_project"
+
+knitr::opts_knit$set(root.dir = project_dir)
+
+knitr::opts_chunk$set(
+  message    = FALSE,
+  warning    = FALSE,
+  echo       = TRUE,
+  fig.align  = "center",
+  out.width  = "85%",
+  fig.width  = 9,
+  fig.height = 6,
+  dpi        = 120
+)
+
+dir.create(project_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(project_dir, "data"), recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(project_dir, "data/metadata"), recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(project_dir, "data/fastq"), recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(project_dir, "results"), recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(project_dir, "plots"), recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(project_dir, "qc"), recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(project_dir, "qc/fastqc"), recursive = TRUE, showWarnings = FALSE)
+
+library(GEOquery)
+library(DESeq2)
+```
+
+
+```{r setup, include=FALSE}
+```
+
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(pheatmap)
+library(RColorBrewer)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(clusterProfiler)
+library(enrichplot)
+library(ReactomePA)
+library(msigdbr)
+library(dplyr)
+```
+
+```{css, echo=FALSE}
+/* ---------- Page & typography ---------- */
+body {
+  font-size: 15px;
+  line-height: 1.7;
+  color: #2d3338;
+  background: #fbfcfd;
+}
+.main-container { max-width: 1080px; }
+
+/* ---------- Title block ---------- */
+h1.title {
+  font-weight: 700;
+  color: #1b3a57;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+h4.author, h4.date { color: #6b7785; font-weight: 400; }
+
+/* ---------- Section headings ---------- */
+h1, h2, h3, h4 { color: #1b3a57; }
+h1 {
+  font-weight: 600;
+  border-bottom: 3px solid #2c7fb8;
+  padding-bottom: 6px;
+  margin-top: 1.8em;
+}
+h2 {
+  font-weight: 600;
+  border-left: 4px solid #7fcdbb;
+  padding-left: 10px;
+  margin-top: 1.3em;
+}
+h3 { color: #2c7fb8; }
+
+/* ---------- Figures & captions ---------- */
+img {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+  border-radius: 6px;
+  box-shadow: 0 1px 6px rgba(27, 58, 87, 0.12);
+}
+p.caption, .figure .caption, caption {
+  font-size: 0.85em;
+  font-style: italic;
+  color: #5a6b7b;
+  text-align: center;
+  margin-top: 8px;
+  margin-bottom: 1.4em;
+}
+
+/* ---------- Tables ---------- */
+table { margin-left: auto; margin-right: auto; }
+.table, table {
+  border-collapse: collapse;
+}
+.table thead th, table thead th {
+  background: #1b3a57;
+  color: #fff;
+  font-weight: 600;
+}
+.table tbody tr:nth-child(even) { background: #eef4f8; }
+
+/* ---------- Code ---------- */
+pre {
+  border-radius: 8px;
+  border: 1px solid #e2e8ee;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+code { color: #b5417a; }
+pre code { color: inherit; }
+
+/* ---------- TOC ---------- */
+.tocify {
+  border-radius: 8px;
+  border: 1px solid #e2e8ee;
+}
+.tocify-item.active, .list-group-item.active {
+  background-color: #2c7fb8 !important;
+  border-color: #2c7fb8 !important;
+}
+
+/* ---------- Inline R values & links ---------- */
+a { color: #2c7fb8; }
+a:hover { color: #1b3a57; }
+```
+
+# Introduction
+
+RNA sequencing is a high-throughput sequencing technique used to measure gene expression across the transcriptome. In RNA-seq analysis, sequencing reads are assigned to genes, producing a count matrix where rows represent genes and columns represent samples.
+
+In this project, the public RNA-seq dataset **GSE164073** was selected from the NCBI Gene Expression Omnibus database. The dataset is titled **Response to SARS-CoV-2 infection in cornea, limbus and sclera from human donors**.
+
+The dataset contains human eye tissue samples including cornea, limbus and sclera. The samples were either mock-infected or infected with SARS-CoV-2. The objective of this analysis was to identify genes differentially expressed in SARS-CoV-2 infected samples compared with mock samples while accounting for tissue type.
+
+The workflow followed in this project was:
+
+1. Download GEO metadata and count matrix.
+2. Read and clean the raw count matrix.
+3. Create sample metadata from the count matrix column names.
+4. Perform DESeq2 differential expression analysis.
+5. Generate PCA plot, sample distance heatmap, MA plot and top 50 DEG heatmap.
+6. Perform Gene Ontology enrichment analysis.
+7. Perform Reactome pathway enrichment analysis.
+8. Perform Gene Set Enrichment Analysis using Hallmark gene sets.
+9. Create GSEA bar plot, top 5 GSEA enrichment plots and GSEA core enrichment heatmap.
+10. Perform FastQC and MultiQC quality-control summary.
+11. Summarize the main differential expression and enrichment results.
+
+# Dataset Description
+
+The selected dataset was:
+
+* **GEO accession:** GSE164073
+* **Organism:** Homo sapiens
+* **Experiment type:** RNA-seq
+* **Condition:** Mock vs SARS-CoV-2 infected
+* **Tissues:** Cornea, limbus and sclera
+* **Number of samples:** 18
+
+The count matrix sample names contain the tissue and infection information. Examples include:
+
+* `MW1_cornea_mock_1`
+* `MW4_cornea_CoV2_1`
+* `MW7_limbus_mock_1`
+* `MW10_limbus_CoV2_1`
+* `MW13_sclera_mock_1`
+* `MW16_sclera_CoV2_1`
+
+# Download GEO Metadata and Count Matrix
+
+```{r download-data}
+geo_id <- "GSE164073"
+
+counts_file <- file.path(
+  project_dir,
+  "GSE164073",
+  "GSE164073_Eye_count_matrix.csv.gz"
+)
+
+metadata_file <- file.path(
+  project_dir,
+  "data/metadata/sample_metadata.csv"
+)
+
+if (!file.exists(metadata_file)) {
+  geo_download <- tryCatch(
+    {
+      GEOquery::getGEO(
+        GEO = geo_id,
+        GSEMatrix = TRUE,
+        getGPL = FALSE,
+        destdir = file.path(project_dir, "data")
+      )
+    },
+    error = function(e) {
+      NULL
+    }
+  )
+  
+  if (!is.null(geo_download)) {
+    gse <- geo_download[[1]]
+    colData <- Biobase::pData(gse)
+    
+    write.csv(
+      colData,
+      metadata_file,
+      row.names = TRUE
+    )
+  } else {
+    colData <- data.frame(
+      note = "GEO metadata could not be downloaded during knitting."
+    )
+  }
+} else {
+  colData <- read.csv(
+    metadata_file,
+    row.names = 1,
+    check.names = FALSE
+  )
+}
+
+if (!file.exists(counts_file)) {
+  GEOquery::getGEOSuppFiles(
+    GEO = geo_id,
+    baseDir = project_dir
+  )
+}
+
+list.files(
+  file.path(project_dir, geo_id),
+  recursive = TRUE
+)
+
+dim(colData)
+
+if ("title" %in% colnames(colData)) {
+  head(colData$title, 10)
+}
+```
+
+# Read Raw Count Matrix
+
+```{r read-counts}
+counts_raw <- read.csv(
+  counts_file,
+  header = TRUE,
+  check.names = FALSE
+)
+
+dim(counts_raw)
+head(counts_raw[, 1:6])
+```
+
+The first column contains gene identifiers and the remaining numeric columns contain raw gene counts for the 18 samples.
+
+# Clean Count Matrix
+
+```{r clean-counts}
+gene_id <- as.character(counts_raw[[1]])
+
+numeric_cols <- sapply(counts_raw, is.numeric)
+
+counts_numeric <- counts_raw[, numeric_cols, drop = FALSE]
+
+counts_numeric_df <- data.frame(
+  gene_id_tmp = gene_id,
+  counts_numeric,
+  check.names = FALSE
+)
+
+counts_agg <- aggregate(
+  . ~ gene_id_tmp,
+  data = counts_numeric_df,
+  FUN = sum
+)
+
+rownames(counts_agg) <- counts_agg$gene_id_tmp
+
+counts_agg$gene_id_tmp <- NULL
+
+counts_clean <- round(as.matrix(counts_agg))
+
+storage.mode(counts_clean) <- "integer"
+
+dim(counts_clean)
+head(counts_clean[, 1:5])
+colnames(counts_clean)
+```
+
+After cleaning, the count matrix contains genes as rows and 18 samples as columns.
+
+# Create Metadata from Count Matrix Sample Names
+
+The sample names in the count matrix already contain the tissue and infection condition information. Therefore, metadata was created directly from the count matrix column names.
+
+```{r create-metadata}
+sample_names <- colnames(counts_clean)
+
+colData_sub <- data.frame(
+  sample_id = sample_names,
+  row.names = sample_names
+)
+
+colData_sub$tissue <- NA
+
+colData_sub$tissue[
+  grepl("cornea", colData_sub$sample_id, ignore.case = TRUE)
+] <- "Cornea"
+
+colData_sub$tissue[
+  grepl("limbus", colData_sub$sample_id, ignore.case = TRUE)
+] <- "Limbus"
+
+colData_sub$tissue[
+  grepl("sclera", colData_sub$sample_id, ignore.case = TRUE)
+] <- "Sclera"
+
+colData_sub$infection <- NA
+
+colData_sub$infection[
+  grepl("mock", colData_sub$sample_id, ignore.case = TRUE)
+] <- "Mock"
+
+colData_sub$infection[
+  grepl("CoV2", colData_sub$sample_id, ignore.case = TRUE)
+] <- "SARS_CoV_2"
+
+colData_sub$tissue <- factor(colData_sub$tissue)
+
+colData_sub$infection <- factor(colData_sub$infection)
+
+colData_sub$infection <- relevel(
+  colData_sub$infection,
+  ref = "Mock"
+)
+
+counts_sub <- counts_clean[, rownames(colData_sub)]
+
+table(colData_sub$tissue)
+table(colData_sub$infection)
+
+all(colnames(counts_sub) == rownames(colData_sub))
+
+colData_sub
+```
+
+The final metadata contains three tissues and two conditions:
+
+* Cornea
+* Limbus
+* Sclera
+* Mock
+* SARS-CoV-2 infected
+
+Mock was used as the reference condition.
+
+# Experimental Design
+
+The DESeq2 design formula used was:
+
+```{r design-formula, eval=FALSE}
+design = ~ tissue + infection
+```
+
+This design compares SARS-CoV-2 infected samples against mock samples while adjusting for tissue type.
+
+This is important because cornea, limbus and sclera are biologically different tissues and may have different baseline expression levels.
+
+Interpretation:
+
+* Positive log2FoldChange means higher expression in SARS-CoV-2 infected samples.
+* Negative log2FoldChange means higher expression in mock samples.
+
+# Differential Expression Analysis Using DESeq2
+
+```{r deseq2-analysis}
+dds <- DESeqDataSetFromMatrix(
+  countData = counts_sub,
+  colData = colData_sub,
+  design = ~ tissue + infection
+)
+
+dds <- dds[rowSums(counts(dds)) > 1, ]
+
+dds <- DESeq(dds)
+
+resultsNames(dds)
+```
+
+```{r deseq2-results}
+res <- results(
+  dds,
+  contrast = c("infection", "SARS_CoV_2", "Mock")
+)
+
+summary(res)
+
+resOrdered <- res[order(res$padj), ]
+
+DE <- as.data.frame(resOrdered)
+
+DE$gene_id <- rownames(DE)
+
+write.csv(
+  DE,
+  file.path(project_dir, "results/DEG_results_SARS_CoV_2_vs_Mock.csv"),
+  row.names = FALSE
+)
+
+head(DE)
+```
+
+# Differential Expression Result Summary
+
+```{r deg-summary}
+deg_005 <- DE[!is.na(DE$padj) & DE$padj < 0.05, ]
+
+deg_01 <- DE[!is.na(DE$padj) & DE$padj < 0.1, ]
+
+up_005 <- DE[
+  !is.na(DE$padj) &
+    DE$padj < 0.05 &
+    DE$log2FoldChange > 0,
+]
+
+down_005 <- DE[
+  !is.na(DE$padj) &
+    DE$padj < 0.05 &
+    DE$log2FoldChange < 0,
+]
+
+n_deg_005 <- nrow(deg_005)
+n_deg_01 <- nrow(deg_01)
+n_up_005 <- nrow(up_005)
+n_down_005 <- nrow(down_005)
+
+n_deg_005
+n_deg_01
+n_up_005
+n_down_005
+```
+
+At the adjusted p-value threshold of **padj < 0.05**, `r n_deg_005` genes were differentially expressed.
+
+At the relaxed threshold of **padj < 0.1**, `r n_deg_01` genes were differentially expressed.
+
+Among genes significant at **padj < 0.05**, `r n_up_005` genes were upregulated in SARS-CoV-2 infected samples and `r n_down_005` genes were downregulated in SARS-CoV-2 infected samples.
+
+# PCA Plot
+
+Variance stabilizing transformation was applied before PCA. PCA was used to observe the overall clustering pattern of samples based on gene expression.
+
+```{r pca-plot, echo=FALSE, fig.width=9, fig.height=6, fig.cap="Figure 1. PCA of variance-stabilized expression, coloured by infection status and tissue."}
+vsd <- vst(dds, blind = FALSE)
+
+pca_plot <- plotPCA(vsd, intgroup = c("infection", "tissue")) +
+  ggtitle("PCA Plot: SARS-CoV-2 vs Mock")
+
+ggsave(
+  file.path(project_dir, "plots/PCA_plot_SARS_CoV_2_vs_Mock.png"),
+  pca_plot,
+  width = 7,
+  height = 5
+)
+
+pca_plot
+```
+
+# Sample-to-Sample Distance Heatmap
+
+The sample distance heatmap shows the similarity between samples based on variance-stabilized gene expression values.
+
+```{r sample-distance-heatmap, echo=FALSE, fig.width=8, fig.height=8, fig.cap="Figure 2. Euclidean distances between samples computed on variance-stabilized counts."}
+sampleDists <- dist(t(assay(vsd)))
+
+sampleDistMatrix <- as.matrix(sampleDists)
+
+annotation_col <- data.frame(
+  infection = colData_sub$infection,
+  tissue = colData_sub$tissue
+)
+
+rownames(annotation_col) <- rownames(colData_sub)
+
+png(
+  file.path(project_dir, "plots/sample_distance_heatmap_SARS_CoV_2_vs_Mock.png"),
+  width = 1000,
+  height = 1000
+)
+
+pheatmap(
+  sampleDistMatrix,
+  annotation_col = annotation_col,
+  show_rownames = TRUE,
+  show_colnames = TRUE,
+  fontsize = 7,
+  main = "Sample-to-sample distance heatmap"
+)
+
+dev.off()
+
+pheatmap(
+  sampleDistMatrix,
+  annotation_col = annotation_col,
+  show_rownames = TRUE,
+  show_colnames = TRUE,
+  fontsize = 7,
+  main = "Sample-to-sample distance heatmap"
+)
+```
+
+# MA Plot
+
+The MA plot shows the relationship between average gene expression and log2 fold change. It helps visualize upregulated and downregulated genes.
+
+```{r ma-plot, echo=FALSE, fig.width=8, fig.height=6, fig.cap="Figure 3. MA plot of SARS-CoV-2 vs Mock. Significant genes are highlighted."}
+png(
+  file.path(project_dir, "plots/MA_plot_SARS_CoV_2_vs_Mock.png"),
+  width = 1000,
+  height = 700
+)
+
+plotMA(
+  res,
+  ylim = c(-5, 5),
+  main = "MA Plot: SARS-CoV-2 vs Mock"
+)
+
+dev.off()
+
+plotMA(
+  res,
+  ylim = c(-5, 5),
+  main = "MA Plot: SARS-CoV-2 vs Mock"
+)
+```
+
+# Top 50 Differentially Expressed Gene Heatmap
+
+The top 50 differentially expressed genes were selected based on adjusted p-value and visualized using variance-stabilized expression values.
+
+```{r top50-heatmap, echo=FALSE, fig.width=8, fig.height=10, fig.cap="Figure 4. Row-scaled expression of the top 50 genes ranked by adjusted p-value."}
+top50 <- DE[!is.na(DE$padj), ]
+
+top50 <- top50[order(top50$padj), ]
+
+top50_genes <- head(top50$gene_id, 50)
+
+mat <- assay(vsd)[top50_genes, ]
+
+mat_scaled <- t(scale(t(mat)))
+
+png(
+  file.path(project_dir, "plots/top50_DEG_heatmap_SARS_CoV_2_vs_Mock.png"),
+  width = 1000,
+  height = 1200
+)
+
+pheatmap(
+  mat_scaled,
+  annotation_col = annotation_col,
+  show_rownames = TRUE,
+  show_colnames = TRUE,
+  fontsize_row = 6,
+  fontsize_col = 7,
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+  main = "Top 50 differentially expressed genes"
+)
+
+dev.off()
+
+pheatmap(
+  mat_scaled,
+  annotation_col = annotation_col,
+  show_rownames = TRUE,
+  show_colnames = TRUE,
+  fontsize_row = 6,
+  fontsize_col = 7,
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+  main = "Top 50 differentially expressed genes"
+)
+```
+
+# Gene ID Mapping
+
+Gene identifiers were mapped to gene symbols and Entrez IDs using `org.Hs.eg.db`.
+
+```{r gene-id-mapping}
+DE$gene_id_clean <- gsub("\\..*", "", DE$gene_id)
+
+if (any(grepl("^ENSG", DE$gene_id_clean))) {
+  key_type_used <- "ENSEMBL"
+} else {
+  key_type_used <- "SYMBOL"
+}
+
+key_type_used
+
+DE$symbol <- mapIds(
+  org.Hs.eg.db,
+  keys = DE$gene_id_clean,
+  column = "SYMBOL",
+  keytype = key_type_used,
+  multiVals = "first"
+)
+
+DE$entrez <- mapIds(
+  org.Hs.eg.db,
+  keys = DE$gene_id_clean,
+  column = "ENTREZID",
+  keytype = key_type_used,
+  multiVals = "first"
+)
+
+head(DE[, c("gene_id", "symbol", "entrez")])
+
+write.csv(
+  DE,
+  file.path(project_dir, "results/DEG_results_SARS_CoV_2_vs_Mock_with_mapping.csv"),
+  row.names = FALSE
+)
+```
+
+# Gene Ontology Enrichment Analysis
+
+Gene Ontology enrichment analysis was performed separately for upregulated and downregulated genes.
+
+```{r go-preparation}
+DE_clean <- DE[!is.na(DE$padj) & !is.na(DE$symbol), ]
+
+up_symbols <- unique(DE_clean$symbol[
+  DE_clean$padj < 0.05 & DE_clean$log2FoldChange > 0
+])
+
+down_symbols <- unique(DE_clean$symbol[
+  DE_clean$padj < 0.05 & DE_clean$log2FoldChange < 0
+])
+
+universe_symbols <- unique(DE_clean$symbol)
+
+length(up_symbols)
+length(down_symbols)
+length(universe_symbols)
+```
+
+```{r go-enrichment}
+ego_up_bp <- enrichGO(
+  gene = up_symbols,
+  universe = universe_symbols,
+  OrgDb = org.Hs.eg.db,
+  keyType = "SYMBOL",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  qvalueCutoff = 0.2
+)
+
+ego_down_bp <- enrichGO(
+  gene = down_symbols,
+  universe = universe_symbols,
+  OrgDb = org.Hs.eg.db,
+  keyType = "SYMBOL",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  qvalueCutoff = 0.2
+)
+
+ego_up_mf <- enrichGO(
+  gene = up_symbols,
+  universe = universe_symbols,
+  OrgDb = org.Hs.eg.db,
+  keyType = "SYMBOL",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  qvalueCutoff = 0.2
+)
+
+ego_down_mf <- enrichGO(
+  gene = down_symbols,
+  universe = universe_symbols,
+  OrgDb = org.Hs.eg.db,
+  keyType = "SYMBOL",
+  ont = "MF",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  qvalueCutoff = 0.2
+)
+
+ego_up_bp_df <- as.data.frame(ego_up_bp)
+ego_down_bp_df <- as.data.frame(ego_down_bp)
+ego_up_mf_df <- as.data.frame(ego_up_mf)
+ego_down_mf_df <- as.data.frame(ego_down_mf)
+
+write.csv(ego_up_bp_df, file.path(project_dir, "results/GO_BP_upregulated.csv"), row.names = FALSE)
+write.csv(ego_down_bp_df, file.path(project_dir, "results/GO_BP_downregulated.csv"), row.names = FALSE)
+write.csv(ego_up_mf_df, file.path(project_dir, "results/GO_MF_upregulated.csv"), row.names = FALSE)
+write.csv(ego_down_mf_df, file.path(project_dir, "results/GO_MF_downregulated.csv"), row.names = FALSE)
+
+head(ego_up_bp_df)
+head(ego_down_bp_df)
+```
+
+# GO Biological Process Dotplot for Upregulated Genes
+
+```{r go-bp-up-plot, echo=FALSE, fig.width=10, fig.height=8, fig.cap="Figure 5. Top GO Biological Process terms enriched among upregulated genes."}
+if (nrow(ego_up_bp_df) > 0) {
+  go_bp_up_plot <- dotplot(ego_up_bp, showCategory = 20) +
+    ggtitle("GO Biological Process - Upregulated in SARS-CoV-2")
+  
+  ggsave(
+    file.path(project_dir, "plots/GO_BP_upregulated_dotplot.png"),
+    go_bp_up_plot,
+    width = 10,
+    height = 8
+  )
+  
+  go_bp_up_plot
+} else {
+  cat("No significant GO BP enrichment found for upregulated genes.")
+}
+```
+
+# GO Biological Process Dotplot for Downregulated Genes
+
+```{r go-bp-down-plot, echo=FALSE, fig.width=10, fig.height=8, fig.cap="Figure 6. Top GO Biological Process terms enriched among downregulated genes."}
+if (nrow(ego_down_bp_df) > 0) {
+  go_bp_down_plot <- dotplot(ego_down_bp, showCategory = 20) +
+    ggtitle("GO Biological Process - Downregulated in SARS-CoV-2")
+  
+  ggsave(
+    file.path(project_dir, "plots/GO_BP_downregulated_dotplot.png"),
+    go_bp_down_plot,
+    width = 10,
+    height = 8
+  )
+  
+  go_bp_down_plot
+} else {
+  cat("No significant GO BP enrichment found for downregulated genes.")
+}
+```
+
+# GO Molecular Function Dotplot for Upregulated Genes
+
+```{r go-mf-up-plot, echo=FALSE, fig.width=10, fig.height=8, fig.cap="Figure 7. Top GO Molecular Function terms enriched among upregulated genes."}
+if (nrow(ego_up_mf_df) > 0) {
+  go_mf_up_plot <- dotplot(ego_up_mf, showCategory = 20) +
+    ggtitle("GO Molecular Function - Upregulated in SARS-CoV-2")
+  
+  ggsave(
+    file.path(project_dir, "plots/GO_MF_upregulated_dotplot.png"),
+    go_mf_up_plot,
+    width = 10,
+    height = 8
+  )
+  
+  go_mf_up_plot
+} else {
+  cat("No significant GO MF enrichment found for upregulated genes.")
+}
+```
+
+# GO Molecular Function Dotplot for Downregulated Genes
+
+```{r go-mf-down-plot, echo=FALSE, fig.width=10, fig.height=8, fig.cap="Figure 8. Top GO Molecular Function terms enriched among downregulated genes."}
+if (nrow(ego_down_mf_df) > 0) {
+  go_mf_down_plot <- dotplot(ego_down_mf, showCategory = 20) +
+    ggtitle("GO Molecular Function - Downregulated in SARS-CoV-2")
+  
+  ggsave(
+    file.path(project_dir, "plots/GO_MF_downregulated_dotplot.png"),
+    go_mf_down_plot,
+    width = 10,
+    height = 8
+  )
+  
+  go_mf_down_plot
+} else {
+  cat("No significant GO MF enrichment found for downregulated genes.")
+}
+```
+
+# GO Enrichment Result Summary
+
+For the GO enrichment summary, the **GO Biological Process enrichment result for upregulated genes** was selected first. If no significant category was found in that result, the **GO Biological Process enrichment result for downregulated genes** was used.
+
+```{r go-result-summary}
+selected_go_name <- "GO BP enrichment result for upregulated genes"
+selected_go_df <- ego_up_bp_df
+
+if (nrow(selected_go_df) == 0) {
+  selected_go_name <- "GO BP enrichment result for downregulated genes"
+  selected_go_df <- ego_down_bp_df
+}
+
+if (nrow(selected_go_df) > 0) {
+  selected_go_df <- selected_go_df[order(selected_go_df$p.adjust), ]
+  
+  significant_go <- selected_go_df[selected_go_df$p.adjust < 0.05, ]
+  
+  n_significant_go <- nrow(significant_go)
+  
+  most_enriched_go_bp <- selected_go_df[1, "Description"]
+  most_enriched_go_bp_count <- selected_go_df[1, "Count"]
+  most_enriched_go_bp_padjust <- selected_go_df[1, "p.adjust"]
+} else {
+  significant_go <- data.frame()
+  
+  n_significant_go <- 0
+  
+  most_enriched_go_bp <- NA
+  most_enriched_go_bp_count <- NA
+  most_enriched_go_bp_padjust <- NA
+}
+
+selected_go_name
+n_significant_go
+most_enriched_go_bp
+most_enriched_go_bp_count
+most_enriched_go_bp_padjust
+```
+
+The selected GO enrichment result was **`r selected_go_name`**.
+
+The number of significant GO categories at **p.adjust < 0.05** was **`r n_significant_go`**.
+
+The most enriched GO Biological Process category was **`r most_enriched_go_bp`**.
+
+The number of genes present in this most enriched GO BP category was **`r most_enriched_go_bp_count`**.
+
+# Reactome Pathway Enrichment Analysis
+
+Reactome pathway enrichment analysis was performed using Entrez gene identifiers.
+
+```{r reactome-analysis}
+DE_entrez <- DE[!is.na(DE$padj) & !is.na(DE$entrez), ]
+
+up_entrez <- unique(DE_entrez$entrez[
+  DE_entrez$padj < 0.05 & DE_entrez$log2FoldChange > 0
+])
+
+down_entrez <- unique(DE_entrez$entrez[
+  DE_entrez$padj < 0.05 & DE_entrez$log2FoldChange < 0
+])
+
+universe_entrez <- unique(DE_entrez$entrez)
+
+length(up_entrez)
+length(down_entrez)
+length(universe_entrez)
+
+reactome_up <- enrichPathway(
+  gene = up_entrez,
+  universe = universe_entrez,
+  organism = "human",
+  pvalueCutoff = 0.05,
+  pAdjustMethod = "BH",
+  qvalueCutoff = 0.2,
+  readable = TRUE
+)
+
+reactome_down <- enrichPathway(
+  gene = down_entrez,
+  universe = universe_entrez,
+  organism = "human",
+  pvalueCutoff = 0.05,
+  pAdjustMethod = "BH",
+  qvalueCutoff = 0.2,
+  readable = TRUE
+)
+
+reactome_up_df <- as.data.frame(reactome_up)
+reactome_down_df <- as.data.frame(reactome_down)
+
+write.csv(reactome_up_df, file.path(project_dir, "results/Reactome_upregulated.csv"), row.names = FALSE)
+write.csv(reactome_down_df, file.path(project_dir, "results/Reactome_downregulated.csv"), row.names = FALSE)
+
+head(reactome_up_df)
+head(reactome_down_df)
+```
+
+# Reactome Pathway Dotplot for Upregulated Genes
+
+```{r reactome-up-plot, echo=FALSE, fig.width=10, fig.height=8, fig.cap="Figure 9. Reactome pathways enriched among upregulated genes."}
+if (nrow(reactome_up_df) > 0) {
+  reactome_up_plot <- dotplot(reactome_up, showCategory = 20) +
+    ggtitle("Reactome Pathway Enrichment - Upregulated in SARS-CoV-2")
+  
+  ggsave(
+    file.path(project_dir, "plots/Reactome_upregulated_dotplot.png"),
+    reactome_up_plot,
+    width = 10,
+    height = 8
+  )
+  
+  reactome_up_plot
+} else {
+  cat("No significant Reactome enrichment found for upregulated genes.")
+}
+```
+
+# Reactome Pathway Dotplot for Downregulated Genes
+
+```{r reactome-down-plot, echo=FALSE, fig.width=10, fig.height=8, fig.cap="Figure 10. Reactome pathways enriched among downregulated genes."}
+if (nrow(reactome_down_df) > 0) {
+  reactome_down_plot <- dotplot(reactome_down, showCategory = 20) +
+    ggtitle("Reactome Pathway Enrichment - Downregulated in SARS-CoV-2")
+  
+  ggsave(
+    file.path(project_dir, "plots/Reactome_downregulated_dotplot.png"),
+    reactome_down_plot,
+    width = 10,
+    height = 8
+  )
+  
+  reactome_down_plot
+} else {
+  cat("No significant Reactome enrichment found for downregulated genes.")
+}
+```
+
+# Gene Set Enrichment Analysis
+
+GSEA was performed using Hallmark gene sets from MSigDB. Since this dataset is from **Homo sapiens**, human Hallmark gene sets were used. Genes were ranked by the DESeq2 statistic value.
+
+```{r gsea-analysis}
+h_gene_sets <- tryCatch(
+  msigdbr::msigdbr(
+    species = "Homo sapiens",
+    collection = "H"
+  ),
+  error = function(e) {
+    msigdbr::msigdbr(
+      species = "Homo sapiens",
+      category = "H"
+    )
+  }
+)
+
+msigdbr_t2g <- h_gene_sets %>%
+  dplyr::distinct(gs_name, gene_symbol)
+
+DE_gsea <- DE[!is.na(DE$stat), ]
+
+if ("symbol" %in% colnames(DE_gsea)) {
+  DE_gsea <- DE_gsea[!is.na(DE_gsea$symbol), ]
+  rank <- DE_gsea$stat
+  names(rank) <- DE_gsea$symbol
+} else {
+  DE_gsea <- DE_gsea[!is.na(DE_gsea$gene_id), ]
+  rank <- DE_gsea$stat
+  names(rank) <- DE_gsea$gene_id
+}
+
+rank <- rank[!is.na(names(rank))]
+rank <- rank[names(rank) != ""]
+rank <- rank[!duplicated(names(rank))]
+rank <- sort(rank, decreasing = TRUE)
+
+gsea <- clusterProfiler::GSEA(
+  geneList = rank,
+  TERM2GENE = msigdbr_t2g,
+  pvalueCutoff = 0.1
+)
+
+gsea_df <- as.data.frame(gsea)
+
+write.csv(
+  gsea_df,
+  file.path(project_dir, "results/GSEA_Hallmark_results.csv"),
+  row.names = FALSE
+)
+
+dim(gsea_df)
+
+if (nrow(gsea_df) > 0) {
+  head(
+    gsea_df[, c("ID", "Description", "NES", "pvalue", "p.adjust", "qvalue")],
+    10
+  )
+}
+
+if (nrow(gsea_df) > 0) {
+  n_gsea_005 <- sum(gsea_df$p.adjust < 0.05, na.rm = TRUE)
+  n_gsea_01 <- sum(gsea_df$p.adjust < 0.1, na.rm = TRUE)
+} else {
+  n_gsea_005 <- 0
+  n_gsea_01 <- 0
+}
+
+n_gsea_005
+n_gsea_01
+```
+
+`r n_gsea_005` Hallmark gene sets were significant at p.adjust < 0.05 and `r n_gsea_01` Hallmark gene sets were significant at p.adjust < 0.1.
+
+# GSEA Hallmark NES Bar Plot
+
+The bar plot shows the normalized enrichment score of the top Hallmark gene sets. Positive NES values indicate enrichment in SARS-CoV-2 infected samples, while negative NES values indicate enrichment in mock samples.
+
+```{r gsea-bar-plot, echo=FALSE, fig.width=10, fig.height=7, fig.cap="Figure 11. Normalized Enrichment Scores for the top Hallmark gene sets."}
+if (nrow(gsea_df) > 0) {
+  gsea_df_top <- gsea_df %>%
+    arrange(p.adjust) %>%
+    head(20)
+  
+  gsea_bar <- ggplot(
+    gsea_df_top,
+    aes(x = reorder(Description, NES), y = NES, fill = NES > 0)
+  ) +
+    geom_col() +
+    coord_flip() +
+    theme_minimal() +
+    labs(
+      title = "Top Hallmark GSEA Results",
+      x = "Hallmark Gene Set",
+      y = "Normalized Enrichment Score"
+    ) +
+    guides(fill = "none")
+  
+  ggsave(
+    file.path(project_dir, "plots/GSEA_Hallmark_NES_barplot.png"),
+    gsea_bar,
+    width = 10,
+    height = 7
+  )
+  
+  gsea_bar
+} else {
+  cat("No significant GSEA results found.")
+}
+```
+
+# Top 5 GSEA Enrichment Plots
+
+The enrichment plots show the running enrichment score for the top five Hallmark gene sets.
+
+```{r top5-gsea-plots, echo=FALSE, fig.width=9, fig.height=7, fig.cap=paste0("Figure 12.", 1:5, " GSEA enrichment plot for the ", c("1st","2nd","3rd","4th","5th"), " most significant Hallmark gene set.")}
+if (nrow(gsea_df) > 0) {
+  top5_gsea_ids <- gsea_df %>%
+    arrange(p.adjust) %>%
+    head(5) %>%
+    pull(ID)
+  
+  for (i in seq_along(top5_gsea_ids)) {
+    gsea_plot_i <- gseaplot2(
+      gsea,
+      geneSetID = top5_gsea_ids[i],
+      title = top5_gsea_ids[i]
+    )
+    
+    png(
+      file.path(project_dir, paste0("plots/GSEA_enrichment_plot_", i, ".png")),
+      width = 1000,
+      height = 800
+    )
+    
+    print(gsea_plot_i)
+    
+    dev.off()
+    
+    print(gsea_plot_i)
+  }
+}
+```
+
+# GSEA Core Enrichment Heatmap
+
+The core enrichment heatmap shows the expression levels of genes that belong to the `core_enrichment` column of the most significant Hallmark gene set.
+
+```{r gsea-core-heatmap, echo=FALSE, warning=FALSE, message=FALSE, fig.width=9, fig.height=21, out.width="78%", fig.cap="Figure 13. Row-scaled expression of core-enrichment genes from the most significant Hallmark gene set."}
+if (nrow(gsea_df) > 0) {
+
+  gsea_df_sorted <- gsea_df %>%
+    arrange(p.adjust)
+
+  top_gsea <- gsea_df_sorted[1, ]
+
+  selected_hallmark <- top_gsea$Description
+
+  core_genes <- strsplit(top_gsea$core_enrichment, "/")[[1]]
+
+  vsd_mat <- assay(vsd)
+
+  vsd_symbols <- rownames(vsd_mat)
+  vsd_symbols <- gsub("\\..*", "", vsd_symbols)
+
+  if (any(grepl("^ENSG", vsd_symbols))) {
+    vsd_symbols <- mapIds(
+      org.Hs.eg.db,
+      keys = vsd_symbols,
+      column = "SYMBOL",
+      keytype = "ENSEMBL",
+      multiVals = "first"
+    )
+  }
+
+  vsd_df <- as.data.frame(vsd_mat)
+  vsd_df$symbol <- vsd_symbols
+
+  vsd_df <- vsd_df[!is.na(vsd_df$symbol) & vsd_df$symbol != "", ]
+
+  vsd_symbol_df <- vsd_df %>%
+    group_by(symbol) %>%
+    summarise(across(where(is.numeric), mean), .groups = "drop")
+
+  vsd_symbol_mat <- as.matrix(vsd_symbol_df[, -1])
+  rownames(vsd_symbol_mat) <- vsd_symbol_df$symbol
+
+  core_genes_present <- intersect(core_genes, rownames(vsd_symbol_mat))
+
+  if (length(core_genes_present) >= 2) {
+
+    core_mat <- vsd_symbol_mat[core_genes_present, , drop = FALSE]
+
+    core_mat_scaled <- t(scale(t(core_mat)))
+
+    core_mat_scaled <- core_mat_scaled[
+      rowSums(is.na(core_mat_scaled)) == 0,
+      ,
+      drop = FALSE
+    ]
+
+    if (nrow(core_mat_scaled) >= 2) {
+
+      # Diverging blue-white-red palette for row-scaled z-scores: blue = low,
+      # red = high. Symmetric breaks keep 0 (the row mean) centred on white.
+      heat_palette <- colorRampPalette(
+        rev(RColorBrewer::brewer.pal(11, "RdBu"))
+      )(100)
+
+      z_max <- max(abs(core_mat_scaled), na.rm = TRUE)
+      heat_breaks <- seq(-z_max, z_max, length.out = 101)
+
+      # Annotation colours tied to the report's palette so the figure feels
+      # part of the document rather than default pastel.
+      ann_colors <- list(
+        infection = c(
+          "Mock"       = "#7fcdbb",
+          "SARS_CoV_2" = "#d7301f"
+        ),
+        tissue = c(
+          "Cornea" = "#1b3a57",
+          "Limbus" = "#2c7fb8",
+          "Sclera" = "#a6bddb"
+        )
+      )
+
+      # Render the heatmap directly into the report. Drawing inline (rather than
+      # saving a PNG and re-embedding it) is what reliably produces the image
+      # with no blank gap. The chunk's fig.width / fig.height / out.width control
+      # the size, and the CSS centres it.
+      pheatmap(
+        core_mat_scaled,
+        color = heat_palette,
+        breaks = heat_breaks,
+        annotation_col = annotation_col,
+        annotation_colors = ann_colors,
+        show_rownames = TRUE,
+        show_colnames = TRUE,
+        fontsize = 9,
+        fontsize_row = 6,
+        fontsize_col = 8,
+        angle_col = 45,
+        border_color = NA,
+        treeheight_row = 25,
+        treeheight_col = 25,
+        cutree_cols = 2,
+        legend = TRUE,
+        main = paste0("\nCore enrichment genes: ", selected_hallmark, "\n")
+      )
+
+    } else {
+      cat("Core enrichment genes matched, but not enough genes remained after scaling.")
+    }
+
+  } else {
+    cat("Not enough core enrichment genes matched the expression matrix.")
+  }
+
+} else {
+  cat("No GSEA results were available for core enrichment heatmap.")
+}
+```
+
+# FastQC and MultiQC
+
+For raw read quality control, FASTQ files were downloaded from the SRA record linked to GSE164073. At least two FASTQ files were analyzed using FastQC.
+
+The selected FASTQ files were saved in:
+
+```text
+C:/UNI/2.2/Bioinformatics 1/RNAseq_project/data/fastq
+```
+
+FastQC output files were saved in:
+
+```text
+C:/UNI/2.2/Bioinformatics 1/RNAseq_project/qc/fastqc
+```
+
+MultiQC was then used to summarize the FastQC outputs into a single HTML report.
+
+The MultiQC command used was:
+
+```text
+python -m multiqc qc/fastqc -o qc
+```
+
+```{r qc-files}
+fastqc_files <- list.files(
+  file.path(project_dir, "qc/fastqc"),
+  full.names = FALSE
+)
+
+fastqc_files
+
+multiqc_exists <- file.exists(
+  file.path(project_dir, "qc/multiqc_report.html")
+)
+
+multiqc_exists
+```
+
+In the FastQC result, most modules passed, including basic statistics, per base sequence quality, per sequence quality scores, GC content, N content, overrepresented sequences and adapter content. The per base sequence content module showed a failure, which indicates base composition bias across read positions. This is commonly observed in RNA-seq data due to library preparation or priming bias, especially at the beginning of reads. Since overall read quality and adapter content passed, the data were considered acceptable for this quality-control step.
+
+# Differential Expression and GO Enrichment Summary
+
+This section summarizes the main numerical results obtained from the DESeq2 differential expression analysis and Gene Ontology enrichment analysis.
+
+## Differentially Expressed Genes at padj < 0.05
+
+At the adjusted p-value threshold of **padj < 0.05**, the number of differentially expressed genes was:
+
+```{r deg-answer-005}
+n_deg_005
+```
+
+Therefore, **`r n_deg_005` genes** were differentially expressed at **padj < 0.05**.
+
+## Differentially Expressed Genes at padj < 0.1
+
+At the relaxed adjusted p-value threshold of **padj < 0.1**, the number of differentially expressed genes was:
+
+```{r deg-answer-01}
+n_deg_01
+```
+
+Therefore, **`r n_deg_01` genes** were differentially expressed at **padj < 0.1**.
+
+## Upregulated and Downregulated Genes at padj < 0.05
+
+At **padj < 0.05**, the number of upregulated genes was:
+
+```{r upregulated-answer}
+n_up_005
+```
+
+At **padj < 0.05**, the number of downregulated genes was:
+
+```{r downregulated-answer}
+n_down_005
+```
+
+Therefore, among the genes significant at **padj < 0.05**, **`r n_up_005` genes** were upregulated in SARS-CoV-2 infected samples and **`r n_down_005` genes** were downregulated.
+
+## Selected GO Enrichment Result
+
+For the GO enrichment summary, the selected enrichment result was:
+
+```{r selected-go-answer}
+selected_go_name
+```
+
+The number of significant GO categories at **p.adjust < 0.05** was:
+
+```{r significant-go-answer}
+n_significant_go
+```
+
+Therefore, the selected GO enrichment result contained **`r n_significant_go` significant categories** at **p.adjust < 0.05**.
+
+## Most Enriched GO Biological Process Category
+
+The most enriched GO Biological Process category was:
+
+```{r go-category-answer}
+most_enriched_go_bp
+```
+
+The number of genes present in this most enriched GO BP category was:
+
+```{r go-category-count-answer}
+most_enriched_go_bp_count
+```
+
+Therefore, the most enriched GO BP category **`r most_enriched_go_bp`** contained **`r most_enriched_go_bp_count` genes**.
+
+## Summary of Main Results
+
+```{r final-result-summary-table}
+result_summary <- data.frame(
+  Result = c(
+    "Differentially expressed genes at padj < 0.05",
+    "Differentially expressed genes at padj < 0.1",
+    "Upregulated genes at padj < 0.05",
+    "Downregulated genes at padj < 0.05",
+    "Selected GO enrichment result",
+    "Significant GO categories at p.adjust < 0.05",
+    "Most enriched GO BP category",
+    "Genes in the most enriched GO BP category"
+  ),
+  Value = c(
+    n_deg_005,
+    n_deg_01,
+    n_up_005,
+    n_down_005,
+    selected_go_name,
+    n_significant_go,
+    most_enriched_go_bp,
+    most_enriched_go_bp_count
+  )
+)
+
+knitr::kable(
+  result_summary,
+  caption = "Summary of Differential Expression and GO Enrichment Results"
+)
+```
+
+# Final Conclusion
+
+In this project, the RNA-seq dataset GSE164073 was analyzed to study the transcriptomic response to SARS-CoV-2 infection in human eye tissues. The dataset included cornea, limbus and sclera samples under mock-infected and SARS-CoV-2 infected conditions.
+
+Differential expression analysis was performed using DESeq2 with the design formula `~ tissue + infection`, allowing the infection effect to be tested while accounting for tissue-specific differences.
+
+At **padj < 0.05**, `r n_deg_005` genes were differentially expressed. At **padj < 0.1**, `r n_deg_01` genes were differentially expressed. Among genes significant at **padj < 0.05**, `r n_up_005` genes were upregulated in SARS-CoV-2 infected samples and `r n_down_005` genes were downregulated.
+
+For GO enrichment analysis, the selected result was **`r selected_go_name`**. The number of significant GO categories at **p.adjust < 0.05** was **`r n_significant_go`**. The most enriched GO BP category was **`r most_enriched_go_bp`**, and the number of genes present in this category was **`r most_enriched_go_bp_count`**.
+
+Gene Ontology enrichment analysis, Reactome pathway enrichment analysis and Gene Set Enrichment Analysis were performed to interpret the biological significance of the differentially expressed genes. FastQC and MultiQC were used to assess and summarize the quality of raw sequencing reads.
+
+Overall, the results show that SARS-CoV-2 infection produces measurable gene expression changes in human eye tissues.
