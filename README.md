@@ -1,6 +1,6 @@
 This repository contains the R Markdown script for analyzing the transcriptomic response to SARS-CoV-2 infection in human eye tissues. The primary objective is to identify differentially expressed genes in SARS-CoV-2 infected samples compared to mock samples, while accounting for tissue-specific differences.
 
-ANALYSIS WORKFLOW
+ANALYSIS WORKFLOW -
 The pipeline executed in rnaseq_analysis.Rmd follows these steps:   
 1. Data Retrieval: Downloading GEO metadata and the raw count matrix.
 2. Data Preprocessing: Cleaning the count matrix and creating sample metadata.
@@ -11,7 +11,7 @@ The pipeline executed in rnaseq_analysis.Rmd follows these steps:
 7. GSEA: Executing Gene Set Enrichment Analysis using MSigDB human Hallmark gene sets.
 8. Quality Control: Summarizing raw read quality using FastQC and MultiQC.
 
-DEPENDENCIES 
+DEPENDENCIES -
 This analysis requires R and the following packages:   
 - GEOquery
 - DESeq2
